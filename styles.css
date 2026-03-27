@@ -254,7 +254,8 @@ th,
 
 .employee-form label,
 .filter-control,
-.leave-type-control {
+.leave-type-control,
+.manual-time-control {
   display: grid;
   gap: 0.45rem;
   color: var(--ink);
@@ -264,7 +265,8 @@ th,
 .employee-form input,
 .filter-control input,
 .filter-control select,
-.leave-type-control select {
+.leave-type-control select,
+.manual-time-control input {
   width: 100%;
   padding: 0.95rem 1rem;
   border: 1px solid rgba(30, 36, 48, 0.12);
@@ -282,7 +284,15 @@ th,
   min-width: 160px;
 }
 
+.manual-time-control {
+  min-width: 150px;
+}
+
 .leave-type-control span {
+  font-size: 0.8rem;
+}
+
+.manual-time-control span {
   font-size: 0.8rem;
 }
 

@@ -240,6 +240,8 @@ function renderEmployees() {
     const leave = fragment.querySelector(".employee-leave");
     const leaveType = fragment.querySelector(".employee-leave-type");
     const leaveTypeSelect = fragment.querySelector(".leave-type-select");
+    const manualInTimeInput = fragment.querySelector(".manual-in-time");
+    const manualOutTimeInput = fragment.querySelector(".manual-out-time");
     const editBtn = fragment.querySelector(".edit-btn");
     const removeBtn = fragment.querySelector(".remove-btn");
 
@@ -253,12 +255,14 @@ function renderEmployees() {
     leave.textContent = attendance.onLeave ? "Yes" : "No";
     leaveType.textContent = attendance.leaveType || "--";
     leaveTypeSelect.value = attendance.leaveType || "Sick";
+    manualInTimeInput.value = toTimeInputValue(attendance.inTime);
+    manualOutTimeInput.value = toTimeInputValue(attendance.outTime);
 
     fragment.querySelector(".check-in-btn").addEventListener("click", async () => {
-      await updateAttendance(employee.id, "check_in");
+      await updateAttendance(employee.id, "check_in", "", manualInTimeInput.value);
     });
     fragment.querySelector(".check-out-btn").addEventListener("click", async () => {
-      await updateAttendance(employee.id, "check_out");
+      await updateAttendance(employee.id, "check_out", "", manualOutTimeInput.value);
     });
     fragment.querySelector(".leave-btn").addEventListener("click", async () => {
       await updateAttendance(employee.id, "leave", leaveTypeSelect.value);
@@ -377,14 +381,14 @@ function applyRosterFilters() {
   renderEmployees();
 }
 
-async function updateAttendance(employeeId, action, leaveType = "") {
+async function updateAttendance(employeeId, action, leaveType = "", manualTime = "") {
   if (!requireAdmin()) {
     return;
   }
   try {
     await api("/api/attendance", {
       method: "POST",
-      body: { employeeId, action, leaveType, date: state.selectedDate },
+      body: { employeeId, action, leaveType, manualTime, date: state.selectedDate },
     });
     await loadDashboard();
   } catch (error) {
@@ -488,6 +492,16 @@ function formatTime(value) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function toTimeInputValue(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
 }
 
 function escapeHtml(value) {

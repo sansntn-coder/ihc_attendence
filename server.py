@@ -311,6 +311,15 @@ def combine_selected_date_time(date_key, hour=None, minute=None, second=None):
     return merged.isoformat()
 
 
+def combine_selected_date_and_manual_time(date_key, time_value):
+    if not time_value:
+        return combine_selected_date_time(date_key)
+    parts = time_value.split(":")
+    hour = int(parts[0])
+    minute = int(parts[1]) if len(parts) > 1 else 0
+    return combine_selected_date_time(date_key, hour=hour, minute=minute, second=0)
+
+
 def parse_iso(value):
     if not value:
         return None
@@ -752,6 +761,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         employee_id = int(data["employeeId"])
         selected_date = data["date"]
         action = data["action"]
+        manual_time = data.get("manualTime", "")
         employee = db_fetchone(conn, "SELECT * FROM employees WHERE id = ?", (employee_id,))
         if not employee:
             conn.close()
@@ -762,7 +772,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             "SELECT * FROM attendance_entries WHERE employee_id = ? AND attendance_date = ?",
             (employee_id, selected_date),
         )
-        timestamp = combine_selected_date_time(selected_date)
+        timestamp = combine_selected_date_and_manual_time(selected_date, manual_time)
 
         if action == "check_in":
             payload = {
