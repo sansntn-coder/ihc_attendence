@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IHC Attendance Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">IHC Workforce Desk</p>
+          <h1>IHC attendance tracking for shifts, overtime, and leave.</h1>
+          <p class="hero-text">
+            Track in time, out time, leave category, and auto-calculated
+            overtime for the IHC team with date-wise reports, monthly summaries,
+            and secure admin management.
+          </p>
+        </div>
+        <div class="hero-panel">
+          <div class="hero-metric">
+            <span id="todayPresenceRate">0%</span>
+            <p>IHC attendance rate on selected date</p>
+          </div>
+          <div class="hero-metric">
+            <span id="activeEmployeesCount">0</span>
+            <p>Employees currently on shift</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <section class="panel panel-admin">
+          <div class="panel-heading split-heading">
+            <div>
+              <h2>Admin access</h2>
+              <p>Login to add, edit, remove, and manage admin accounts.</p>
+            </div>
+            <div class="admin-status-bar">
+              <span id="adminStatusBadge" class="admin-badge">Viewer mode</span>
+              <span id="adminIdentity" class="admin-identity hidden"></span>
+              <button type="button" id="adminLogoutBtn" class="secondary-btn hidden">Logout</button>
+            </div>
+          </div>
+
+          <form id="adminLoginForm" class="employee-form inline-form">
+            <label>
+              Admin username
+              <input type="text" id="adminUsername" name="adminUsername" placeholder="admin" required />
+            </label>
+            <label>
+              Password
+              <input type="password" id="adminPassword" name="adminPassword" placeholder="admin123" required />
+            </label>
+            <button type="submit" class="primary-btn">Admin login</button>
+          </form>
+          <p id="adminHelpText" class="admin-help">Default local login: `admin` / `admin123`</p>
+
+          <div id="adminTools" class="admin-tools hidden">
+            <div class="admin-grid">
+              <section class="admin-card">
+                <h3>Change password</h3>
+                <form id="passwordChangeForm" class="employee-form compact-form">
+                  <label>
+                    Current password
+                    <input type="password" id="currentPassword" required />
+                  </label>
+                  <label>
+                    New password
+                    <input type="password" id="newPassword" required />
+                  </label>
+                  <button type="submit" class="secondary-btn">Update password</button>
+                </form>
+              </section>
+
+              <section class="admin-card">
+                <h3>Add admin user</h3>
+                <form id="adminCreateForm" class="employee-form compact-form">
+                  <label>
+                    Username
+                    <input type="text" id="newAdminUsername" required />
+                  </label>
+                  <label>
+                    Password
+                    <input type="password" id="newAdminPassword" required />
+                  </label>
+                  <button type="submit" class="secondary-btn">Create admin</button>
+                </form>
+              </section>
+            </div>
+
+            <section class="admin-card">
+              <h3>Admin users</h3>
+              <div id="adminUsersList" class="admin-users-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel panel-form">
+          <div class="panel-heading">
+            <h2>Add IHC employee</h2>
+            <p>Create a roster entry before recording daily attendance.</p>
+          </div>
+          <form id="employeeForm" class="employee-form">
+            <label>
+              Full name
+              <input type="text" id="employeeName" name="employeeName" placeholder="Aarav Patel" required />
+            </label>
+            <label>
+              Team / Unit
+              <input type="text" id="employeeDepartment" name="employeeDepartment" placeholder="IHC Front Office" required />
+            </label>
+            <label>
+              Employee ID
+              <input type="text" id="employeeCode" name="employeeCode" placeholder="EMP-204" required />
+            </label>
+            <button type="submit" id="employeeSubmitBtn" class="primary-btn">Add to IHC roster</button>
+          </form>
+          <p id="employeeFormHint" class="admin-help">Admin login required to add new employees.</p>
+        </section>
+
+        <section class="panel panel-summary">
+          <div class="panel-heading">
+            <h2>IHC daily snapshot</h2>
+            <p>Live metrics generated from the selected attendance date.</p>
+          </div>
+          <div class="stats-grid">
+            <article class="stat-card accent-green">
+              <span id="checkedInCount">0</span>
+              <p>Checked in</p>
+            </article>
+            <article class="stat-card accent-amber">
+              <span id="checkedOutCount">0</span>
+              <p>Checked out</p>
+            </article>
+            <article class="stat-card accent-blue">
+              <span id="overtimeCount">0h</span>
+              <p>Total overtime</p>
+            </article>
+            <article class="stat-card accent-rose">
+              <span id="leaveCount">0</span>
+              <p>Employees on leave</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel panel-monthly">
+          <div class="panel-heading">
+            <h2>Monthly dashboard</h2>
+            <p>Month-to-date operational view based on the selected date.</p>
+          </div>
+          <div class="stats-grid monthly-grid">
+            <article class="stat-card accent-slate">
+              <span id="monthWorkedDays">0</span>
+              <p>Recorded workdays</p>
+            </article>
+            <article class="stat-card accent-mint">
+              <span id="monthPresentDays">0</span>
+              <p>Present entries</p>
+            </article>
+            <article class="stat-card accent-gold">
+              <span id="monthLeaveDays">0</span>
+              <p>Leave entries</p>
+            </article>
+            <article class="stat-card accent-indigo">
+              <span id="monthOvertimeHours">0h</span>
+              <p>Month overtime</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel panel-roster">
+          <div class="panel-heading split-heading">
+            <div>
+              <h2>IHC roster</h2>
+              <p>Apply in time, out time, and leave details for one date.</p>
+            </div>
+            <label class="filter-control">
+              Attendance date
+              <input type="date" id="reportDate" />
+            </label>
+          </div>
+          <div class="roster-controls">
+            <label class="filter-control">
+              Search employee
+              <input type="search" id="employeeSearch" placeholder="Search by name, team, or ID" />
+            </label>
+            <label class="filter-control">
+              Team filter
+              <select id="teamFilter">
+                <option value="all">All teams</option>
+              </select>
+            </label>
+            <label class="filter-control">
+              Status filter
+              <select id="rosterStatusFilter">
+                <option value="all">All statuses</option>
+                <option value="Checked In">Checked In</option>
+                <option value="Checked Out">Checked Out</option>
+                <option value="Leave">Leave</option>
+                <option value="Not Checked In">Not Checked In</option>
+              </select>
+            </label>
+          </div>
+          <div id="employeeList" class="employee-list"></div>
+        </section>
+
+        <section class="panel panel-history">
+          <div class="panel-heading split-heading">
+            <div>
+              <h2>Daily attendance log</h2>
+              <p>Review attendance updates, leave entries, and overtime changes.</p>
+            </div>
+            <div class="history-controls">
+              <label class="filter-control">
+                Filter action
+                <select id="statusFilter">
+                  <option value="all">All updates</option>
+                  <option value="Checked In">Checked In</option>
+                  <option value="Checked Out">Checked Out</option>
+                  <option value="Leave">Leave</option>
+                  <option value="Overtime Auto">Overtime Auto</option>
+                </select>
+              </label>
+              <div class="export-actions">
+                <button type="button" id="exportCsvBtn" class="secondary-btn">Export CSV</button>
+                <button type="button" id="exportExcelBtn" class="secondary-btn">Export Excel</button>
+              </div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Team / Unit</th>
+                  <th>Action</th>
+                  <th>Leave Type</th>
+                  <th>Day Details</th>
+                  <th>Updated At</th>
+                </tr>
+              </thead>
+              <tbody id="attendanceTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="employeeCardTemplate">
+      <article class="employee-card">
+        <div class="employee-meta">
+          <div>
+            <h3 class="employee-name"></h3>
+            <p class="employee-subtitle"></p>
+          </div>
+          <span class="employee-status"></span>
+        </div>
+        <div class="timing-grid">
+          <div class="timing-item">
+            <span>In Time</span>
+            <strong class="employee-in-time">--</strong>
+          </div>
+          <div class="timing-item">
+            <span>Out Time</span>
+            <strong class="employee-out-time">--</strong>
+          </div>
+          <div class="timing-item">
+            <span>Over Time</span>
+            <strong class="employee-overtime">0h</strong>
+          </div>
+          <div class="timing-item">
+            <span>Leave</span>
+            <strong class="employee-leave">No</strong>
+          </div>
+          <div class="timing-item">
+            <span>Leave Type</span>
+            <strong class="employee-leave-type">--</strong>
+          </div>
+        </div>
+        <div class="employee-actions">
+          <button class="action-btn check-in-btn">Set in time</button>
+          <button class="action-btn check-out-btn">Set out time</button>
+          <label class="leave-type-control">
+            <span>Leave type</span>
+            <select class="leave-type-select">
+              <option value="Sick">Sick</option>
+              <option value="Casual">Casual</option>
+              <option value="Paid">Paid</option>
+            </select>
+          </label>
+          <button class="action-btn leave-btn">Apply leave</button>
+          <button class="action-btn edit-btn hidden">Edit</button>
+          <button class="action-btn remove-btn">Remove</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
