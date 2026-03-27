@@ -8,7 +8,7 @@ import json
 import os
 import secrets
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -319,6 +319,16 @@ def parse_iso(value):
     return datetime.fromisoformat(str(value))
 
 
+def to_json_value(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
 def format_timestamp(value):
     parsed = parse_iso(value)
     return "" if not parsed else parsed.strftime("%b %d, %Y, %I:%M %p")
@@ -441,12 +451,12 @@ def build_bootstrap_payload(conn, selected_date, admin):
                 "code": row["code"],
                 "attendance": {
                     "status": status,
-                    "inTime": row["in_time"],
-                    "outTime": row["out_time"],
+                    "inTime": to_json_value(row["in_time"]),
+                    "outTime": to_json_value(row["out_time"]),
                     "overtimeHours": overtime,
                     "onLeave": on_leave,
                     "leaveType": row["leave_type"] or "",
-                    "lastUpdatedAt": row["last_updated_at"],
+                    "lastUpdatedAt": to_json_value(row["last_updated_at"]),
                 },
             }
         )
@@ -476,7 +486,7 @@ def build_bootstrap_payload(conn, selected_date, admin):
         admins = [
             {
                 "username": row["username"],
-                "createdAt": row["created_at"],
+                "createdAt": to_json_value(row["created_at"]),
                 "createdAtLabel": format_timestamp(row["created_at"]),
             }
             for row in admin_rows
@@ -497,7 +507,7 @@ def build_bootstrap_payload(conn, selected_date, admin):
                 "status": row["status"],
                 "leaveType": row["leave_type"] or "",
                 "details": row["details"],
-                "timestamp": row["occurred_at"],
+                "timestamp": to_json_value(row["occurred_at"]),
                 "timestampLabel": format_timestamp(row["occurred_at"]),
             }
             for row in records
