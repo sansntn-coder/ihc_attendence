@@ -125,7 +125,8 @@ th,
 .panel-form,
 .panel-summary,
 .panel-monthly,
-.panel-admin {
+.panel-admin,
+.panel-self {
   grid-column: span 6;
 }
 
@@ -194,6 +195,22 @@ th,
   margin-top: 1.25rem;
   display: grid;
   gap: 1rem;
+}
+
+.self-attendance-card {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(30, 36, 48, 0.07);
+}
+
+.self-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .admin-grid {
@@ -449,6 +466,7 @@ th,
 .leave-btn { background: rgba(108, 83, 183, 0.12); color: #5b4798; }
 .edit-btn { background: rgba(230, 146, 27, 0.14); color: #9c5f0c; }
 .remove-btn { background: rgba(207, 93, 119, 0.12); color: #a13d55; }
+.credentials-btn { background: rgba(50, 126, 199, 0.14); color: #245b8d; }
 
 .table-wrap {
   margin-top: 1.3rem;
@@ -501,6 +519,7 @@ td {
   .panel-summary,
   .panel-monthly,
   .panel-admin,
+  .panel-self,
   .panel-roster,
   .panel-history {
     grid-column: span 12;

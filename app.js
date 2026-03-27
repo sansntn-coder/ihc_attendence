@@ -1,10 +1,13 @@
 const state = {
   isAdmin: false,
   currentAdminUsername: "",
+  employeeLoggedIn: false,
+  currentEmployee: null,
   selectedDate: formatDateKey(new Date()),
   employees: [],
   filteredEmployees: [],
   records: [],
+  selfRecords: [],
   admins: [],
   summary: {
     checkedInCount: 0,
@@ -29,6 +32,27 @@ const statusFilter = document.getElementById("statusFilter");
 const reportDateInput = document.getElementById("reportDate");
 const exportCsvBtn = document.getElementById("exportCsvBtn");
 const exportExcelBtn = document.getElementById("exportExcelBtn");
+
+const employeeLoginForm = document.getElementById("employeeLoginForm");
+const employeeLogoutBtn = document.getElementById("employeeLogoutBtn");
+const employeeStatusBadge = document.getElementById("employeeStatusBadge");
+const employeeLoginUsername = document.getElementById("employeeLoginUsername");
+const employeeLoginPassword = document.getElementById("employeeLoginPassword");
+const selfDashboardSection = document.getElementById("selfDashboardSection");
+const selfAttendanceCard = document.getElementById("selfAttendanceCard");
+const selfHistoryList = document.getElementById("selfHistoryList");
+const selfEmployeeName = document.getElementById("selfEmployeeName");
+const selfCheckInBtn = document.getElementById("selfCheckInBtn");
+const selfCheckOutBtn = document.getElementById("selfCheckOutBtn");
+
+const adminAccessSection = document.getElementById("adminAccessSection");
+const employeeAccessSection = document.getElementById("employeeAccessSection");
+const employeeCreateSection = document.getElementById("employeeCreateSection");
+const summarySection = document.getElementById("summarySection");
+const monthlySection = document.getElementById("monthlySection");
+const rosterSection = document.getElementById("rosterSection");
+const historySection = document.getElementById("historySection");
+
 const adminLoginForm = document.getElementById("adminLoginForm");
 const adminLogoutBtn = document.getElementById("adminLogoutBtn");
 const adminStatusBadge = document.getElementById("adminStatusBadge");
@@ -65,6 +89,36 @@ const employeeCardTemplate = document.getElementById("employeeCardTemplate");
 
 reportDateInput.value = state.selectedDate;
 
+employeeLoginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/employee-login", {
+      method: "POST",
+      body: {
+        username: employeeLoginUsername.value.trim(),
+        password: employeeLoginPassword.value,
+      },
+    });
+    employeeLoginPassword.value = "";
+    await loadDashboard();
+  } catch (error) {
+    window.alert(error.message);
+  }
+});
+
+employeeLogoutBtn.addEventListener("click", async () => {
+  await api("/api/employee-logout", { method: "POST" });
+  await loadDashboard();
+});
+
+selfCheckInBtn.addEventListener("click", async () => {
+  await updateSelfAttendance("check_in");
+});
+
+selfCheckOutBtn.addEventListener("click", async () => {
+  await updateSelfAttendance("check_out");
+});
+
 adminLoginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -92,7 +146,6 @@ passwordChangeForm.addEventListener("submit", async (event) => {
   if (!requireAdmin()) {
     return;
   }
-
   try {
     await api("/api/change-password", {
       method: "POST",
@@ -113,7 +166,6 @@ adminCreateForm.addEventListener("submit", async (event) => {
   if (!requireAdmin()) {
     return;
   }
-
   try {
     await api("/api/admins", {
       method: "POST",
@@ -134,7 +186,6 @@ employeeForm.addEventListener("submit", async (event) => {
   if (!requireAdmin()) {
     return;
   }
-
   const formData = new FormData(employeeForm);
   try {
     await api("/api/employees", {
@@ -182,9 +233,12 @@ async function loadDashboard() {
   const data = await api(`/api/bootstrap?date=${encodeURIComponent(state.selectedDate)}`);
   state.isAdmin = data.isAdmin;
   state.currentAdminUsername = data.currentAdminUsername || "";
+  state.employeeLoggedIn = Boolean(data.employeeLoggedIn);
+  state.currentEmployee = data.currentEmployee || null;
   state.selectedDate = data.selectedDate;
   state.employees = data.employees;
   state.records = data.records;
+  state.selfRecords = data.selfRecords || [];
   state.admins = data.admins || [];
   state.summary = data.summary;
   state.monthlySummary = data.monthlySummary;
@@ -195,12 +249,75 @@ async function loadDashboard() {
 
 function render() {
   reportDateInput.value = state.selectedDate;
+  renderEmployeeState();
   renderAdminState();
   renderEmployees();
   renderHistory();
   renderSummary();
   renderMonthlySummary();
   renderAdminUsers();
+  renderSelfDashboard();
+}
+
+function renderEmployeeState() {
+  employeeStatusBadge.textContent = state.employeeLoggedIn ? "Employee logged in" : "Employee logged out";
+  employeeStatusBadge.classList.toggle("is-admin", state.employeeLoggedIn);
+  employeeLogoutBtn.classList.toggle("hidden", !state.employeeLoggedIn);
+  employeeLoginForm.classList.toggle("hidden", state.employeeLoggedIn);
+  selfDashboardSection.classList.toggle("hidden", !state.employeeLoggedIn);
+
+  const employeeModeOnly = state.employeeLoggedIn && !state.isAdmin;
+  adminAccessSection.classList.toggle("hidden", employeeModeOnly);
+  employeeCreateSection.classList.toggle("hidden", employeeModeOnly);
+  summarySection.classList.toggle("hidden", employeeModeOnly);
+  monthlySection.classList.toggle("hidden", employeeModeOnly);
+  rosterSection.classList.toggle("hidden", employeeModeOnly);
+  historySection.classList.toggle("hidden", employeeModeOnly);
+}
+
+function renderSelfDashboard() {
+  if (!state.employeeLoggedIn || !state.currentEmployee) {
+    selfEmployeeName.textContent = "--";
+    selfAttendanceCard.innerHTML = "";
+    selfHistoryList.innerHTML = "";
+    return;
+  }
+
+  const attendance = state.currentEmployee.attendance;
+  selfEmployeeName.textContent = `${state.currentEmployee.name} • ${state.currentEmployee.code}`;
+  selfAttendanceCard.innerHTML = `
+    <div class="timing-grid">
+      <div class="timing-item"><span>Status</span><strong>${escapeHtml(attendance.status)}</strong></div>
+      <div class="timing-item"><span>In Time</span><strong>${escapeHtml(formatTime(attendance.inTime))}</strong></div>
+      <div class="timing-item"><span>Out Time</span><strong>${escapeHtml(formatTime(attendance.outTime))}</strong></div>
+      <div class="timing-item"><span>Over Time</span><strong>${escapeHtml(String(attendance.overtimeHours))}h</strong></div>
+      <div class="timing-item"><span>Leave Type</span><strong>${escapeHtml(attendance.leaveType || "--")}</strong></div>
+    </div>
+  `;
+
+  selfHistoryList.innerHTML = "";
+  if (state.selfRecords.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No self attendance activity recorded yet.";
+    selfHistoryList.append(empty);
+    return;
+  }
+
+  state.selfRecords.forEach((record) => {
+    const card = document.createElement("article");
+    card.className = "employee-card";
+    card.innerHTML = `
+      <div class="employee-meta">
+        <div>
+          <h3 class="employee-name">${escapeHtml(record.status)}</h3>
+          <p class="employee-subtitle">${escapeHtml(record.details)}</p>
+        </div>
+        <span class="employee-status status-${record.status.toLowerCase().replace(/\s+/g, "-")}">${escapeHtml(record.timestampLabel)}</span>
+      </div>
+    `;
+    selfHistoryList.append(card);
+  });
 }
 
 function renderAdminState() {
@@ -219,7 +336,6 @@ function renderAdminState() {
 
 function renderEmployees() {
   employeeList.innerHTML = "";
-
   if (state.filteredEmployees.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
@@ -242,11 +358,12 @@ function renderEmployees() {
     const leaveTypeSelect = fragment.querySelector(".leave-type-select");
     const manualInTimeInput = fragment.querySelector(".manual-in-time");
     const manualOutTimeInput = fragment.querySelector(".manual-out-time");
+    const credentialsBtn = fragment.querySelector(".credentials-btn");
     const editBtn = fragment.querySelector(".edit-btn");
     const removeBtn = fragment.querySelector(".remove-btn");
 
     name.textContent = employee.name;
-    subtitle.textContent = `${employee.department} • ${employee.code}`;
+    subtitle.textContent = `${employee.department} • ${employee.code}${employee.loginUsername ? ` • login: ${employee.loginUsername}` : ""}`;
     status.textContent = attendance.status;
     status.classList.add(`status-${attendance.status.toLowerCase().replace(/\s+/g, "-")}`);
     inTime.textContent = formatTime(attendance.inTime);
@@ -268,8 +385,13 @@ function renderEmployees() {
       await updateAttendance(employee.id, "leave", leaveTypeSelect.value);
     });
 
+    credentialsBtn.classList.toggle("hidden", !state.isAdmin);
     editBtn.classList.toggle("hidden", !state.isAdmin);
     removeBtn.classList.toggle("hidden", !state.isAdmin);
+
+    credentialsBtn.addEventListener("click", async () => {
+      await setEmployeeCredentials(employee);
+    });
     editBtn.addEventListener("click", async () => {
       await editEmployee(employee);
     });
@@ -285,7 +407,6 @@ function renderHistory() {
   attendanceTableBody.innerHTML = "";
   const selectedStatus = statusFilter.value;
   const visibleRecords = state.records.filter((record) => selectedStatus === "all" || record.status === selectedStatus);
-
   if (visibleRecords.length === 0) {
     const row = document.createElement("tr");
     row.innerHTML = '<td colspan="6"><p class="empty-state">No attendance records match the current date and filter.</p></td>';
@@ -335,14 +456,10 @@ function renderAdminUsers() {
     adminUsersList.append(empty);
     return;
   }
-
   state.admins.forEach((admin) => {
     const row = document.createElement("div");
     row.className = "admin-user-row";
-    row.innerHTML = `
-      <strong>${escapeHtml(admin.username)}</strong>
-      <span>${escapeHtml(admin.createdAtLabel)}</span>
-    `;
+    row.innerHTML = `<strong>${escapeHtml(admin.username)}</strong><span>${escapeHtml(admin.createdAtLabel)}</span>`;
     adminUsersList.append(row);
   });
 }
@@ -366,18 +483,17 @@ function applyRosterFilters() {
   const query = employeeSearch.value.trim().toLowerCase();
   const selectedTeam = teamFilter.value;
   const selectedStatus = rosterStatusFilter.value;
-
   state.filteredEmployees = state.employees.filter((employee) => {
     const matchesQuery =
       !query ||
       employee.name.toLowerCase().includes(query) ||
       employee.department.toLowerCase().includes(query) ||
-      employee.code.toLowerCase().includes(query);
+      employee.code.toLowerCase().includes(query) ||
+      (employee.loginUsername || "").toLowerCase().includes(query);
     const matchesTeam = selectedTeam === "all" || employee.department === selectedTeam;
     const matchesStatus = selectedStatus === "all" || employee.attendance.status === selectedStatus;
     return matchesQuery && matchesTeam && matchesStatus;
   });
-
   renderEmployees();
 }
 
@@ -389,6 +505,49 @@ async function updateAttendance(employeeId, action, leaveType = "", manualTime =
     await api("/api/attendance", {
       method: "POST",
       body: { employeeId, action, leaveType, manualTime, date: state.selectedDate },
+    });
+    await loadDashboard();
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function updateSelfAttendance(action) {
+  if (!state.employeeLoggedIn) {
+    window.alert("Employee login is required.");
+    return;
+  }
+  try {
+    await api("/api/employee-attendance", {
+      method: "POST",
+      body: { action },
+    });
+    await loadDashboard();
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function setEmployeeCredentials(employee) {
+  if (!requireAdmin()) {
+    return;
+  }
+  const username = window.prompt("Set employee login username:", employee.loginUsername || `${employee.code.toLowerCase()}`);
+  if (username === null) {
+    return;
+  }
+  const password = window.prompt("Set employee login password (min 8 characters):", "");
+  if (password === null) {
+    return;
+  }
+  try {
+    await api("/api/employee-credentials", {
+      method: "POST",
+      body: {
+        employeeId: employee.id,
+        username: username.trim(),
+        password,
+      },
     });
     await loadDashboard();
   } catch (error) {
@@ -412,7 +571,6 @@ async function editEmployee(employee) {
   if (code === null) {
     return;
   }
-
   try {
     await api(`/api/employees/${employee.id}`, {
       method: "PUT",
@@ -461,7 +619,6 @@ async function api(url, options = {}) {
     credentials: "same-origin",
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
-
   if (!response.ok) {
     let message = "Request failed";
     try {
@@ -472,11 +629,9 @@ async function api(url, options = {}) {
     }
     throw new Error(message);
   }
-
   if (response.status === 204) {
     return null;
   }
-
   return response.json();
 }
 
@@ -499,9 +654,7 @@ function toTimeInputValue(value) {
     return "";
   }
   const date = new Date(value);
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 function escapeHtml(value) {

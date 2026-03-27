@@ -25,7 +25,52 @@
       </header>
 
       <main class="dashboard">
-        <section class="panel panel-admin">
+        <section id="employeeAccessSection" class="panel panel-admin">
+          <div class="panel-heading split-heading">
+            <div>
+              <h2>Employee access</h2>
+              <p>Employees can log in and mark their own attendance.</p>
+            </div>
+            <div class="admin-status-bar">
+              <span id="employeeStatusBadge" class="admin-badge">Employee logged out</span>
+              <button type="button" id="employeeLogoutBtn" class="secondary-btn hidden">Employee logout</button>
+            </div>
+          </div>
+          <form id="employeeLoginForm" class="employee-form inline-form">
+            <label>
+              Employee username
+              <input type="text" id="employeeLoginUsername" placeholder="employee.user" required />
+            </label>
+            <label>
+              Password
+              <input type="password" id="employeeLoginPassword" placeholder="password" required />
+            </label>
+            <button type="submit" class="primary-btn">Employee login</button>
+          </form>
+        </section>
+
+        <section id="selfDashboardSection" class="panel panel-self hidden">
+          <div class="panel-heading split-heading">
+            <div>
+              <h2>My attendance</h2>
+              <p>Self check-in and self check-out for the logged-in employee.</p>
+            </div>
+            <div class="admin-status-bar">
+              <span id="selfEmployeeName" class="admin-identity">--</span>
+            </div>
+          </div>
+          <div id="selfAttendanceCard" class="self-attendance-card"></div>
+          <div class="self-actions">
+            <button type="button" id="selfCheckInBtn" class="action-btn check-in-btn">Self check in</button>
+            <button type="button" id="selfCheckOutBtn" class="action-btn check-out-btn">Self check out</button>
+          </div>
+          <div class="panel-heading">
+            <h2>My recent activity</h2>
+          </div>
+          <div id="selfHistoryList" class="employee-list"></div>
+        </section>
+
+        <section id="adminAccessSection" class="panel panel-admin">
           <div class="panel-heading split-heading">
             <div>
               <h2>Admin access</h2>
@@ -91,7 +136,7 @@
           </div>
         </section>
 
-        <section class="panel panel-form">
+        <section id="employeeCreateSection" class="panel panel-form">
           <div class="panel-heading">
             <h2>Add IHC employee</h2>
             <p>Create a roster entry before recording daily attendance.</p>
@@ -114,7 +159,7 @@
           <p id="employeeFormHint" class="admin-help">Admin login required to add new employees.</p>
         </section>
 
-        <section class="panel panel-summary">
+        <section id="summarySection" class="panel panel-summary">
           <div class="panel-heading">
             <h2>IHC daily snapshot</h2>
             <p>Live metrics generated from the selected attendance date.</p>
@@ -139,7 +184,7 @@
           </div>
         </section>
 
-        <section class="panel panel-monthly">
+        <section id="monthlySection" class="panel panel-monthly">
           <div class="panel-heading">
             <h2>Monthly dashboard</h2>
             <p>Month-to-date operational view based on the selected date.</p>
@@ -164,7 +209,7 @@
           </div>
         </section>
 
-        <section class="panel panel-roster">
+        <section id="rosterSection" class="panel panel-roster">
           <div class="panel-heading split-heading">
             <div>
               <h2>IHC roster</h2>
@@ -200,7 +245,7 @@
           <div id="employeeList" class="employee-list"></div>
         </section>
 
-        <section class="panel panel-history">
+        <section id="historySection" class="panel panel-history">
           <div class="panel-heading split-heading">
             <div>
               <h2>Daily attendance log</h2>
@@ -293,6 +338,7 @@
             </select>
           </label>
           <button class="action-btn leave-btn">Apply leave</button>
+          <button class="action-btn credentials-btn hidden">Set login</button>
           <button class="action-btn edit-btn hidden">Edit</button>
           <button class="action-btn remove-btn">Remove</button>
         </div>

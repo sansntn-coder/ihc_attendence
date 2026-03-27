@@ -20,6 +20,7 @@ DB_PATH = ROOT / "attendance.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DB_BACKEND = "postgres" if DATABASE_URL else "sqlite"
 SESSION_COOKIE = "ihc_session"
+EMPLOYEE_SESSION_COOKIE = "ihc_employee_session"
 HOST = os.environ.get("BIND_HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
 STANDARD_SHIFT_HOURS = 8.0
@@ -131,6 +132,15 @@ def init_sqlite(conn):
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS employee_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER UNIQUE NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS attendance_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,
@@ -155,6 +165,13 @@ def init_sqlite(conn):
             details TEXT NOT NULL,
             occurred_at TEXT NOT NULL,
             FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS employee_sessions (
+            token TEXT PRIMARY KEY,
+            employee_user_id INTEGER NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY(employee_user_id) REFERENCES employee_users(id) ON DELETE CASCADE
         );
         """
     )
@@ -198,6 +215,18 @@ def init_postgres(conn):
     db_execute(
         conn,
         """
+        CREATE TABLE IF NOT EXISTS employee_users (
+            id SERIAL PRIMARY KEY,
+            employee_id INTEGER UNIQUE NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL
+        )
+        """,
+    )
+    db_execute(
+        conn,
+        """
         CREATE TABLE IF NOT EXISTS attendance_entries (
             id SERIAL PRIMARY KEY,
             employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -224,6 +253,16 @@ def init_postgres(conn):
             leave_type TEXT NOT NULL DEFAULT '',
             details TEXT NOT NULL,
             occurred_at TIMESTAMP NOT NULL
+        )
+        """,
+    )
+    db_execute(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS employee_sessions (
+            token TEXT PRIMARY KEY,
+            employee_user_id INTEGER NOT NULL REFERENCES employee_users(id) ON DELETE CASCADE,
+            expires_at TIMESTAMP NOT NULL
         )
         """,
     )
@@ -378,6 +417,32 @@ def get_session_admin(conn, token):
     return row
 
 
+def get_session_employee(conn, token):
+    if not token:
+        return None
+    row = db_fetchone(
+        conn,
+        """
+        SELECT
+            employee_users.id AS employee_user_id,
+            employee_users.username,
+            employee_users.employee_id,
+            employee_sessions.expires_at
+        FROM employee_sessions
+        JOIN employee_users ON employee_users.id = employee_sessions.employee_user_id
+        WHERE employee_sessions.token = ?
+        """,
+        (token,),
+    )
+    if not row:
+        return None
+    if parse_iso(row["expires_at"]) < now_utc():
+        db_execute(conn, "DELETE FROM employee_sessions WHERE token = ?", (token,))
+        conn.commit()
+        return None
+    return row
+
+
 def build_monthly_summary(conn, selected_date):
     if DB_BACKEND == "postgres":
         rows = db_fetchall(
@@ -411,7 +476,7 @@ def build_monthly_summary(conn, selected_date):
     }
 
 
-def build_bootstrap_payload(conn, selected_date, admin):
+def build_bootstrap_payload(conn, selected_date, admin, employee_session):
     employees = db_fetchall(
         conn,
         """
@@ -420,6 +485,7 @@ def build_bootstrap_payload(conn, selected_date, admin):
             employees.name,
             employees.department,
             employees.code,
+            employee_users.username AS login_username,
             attendance_entries.status,
             attendance_entries.in_time,
             attendance_entries.out_time,
@@ -428,6 +494,8 @@ def build_bootstrap_payload(conn, selected_date, admin):
             attendance_entries.leave_type,
             attendance_entries.last_updated_at
         FROM employees
+        LEFT JOIN employee_users
+          ON employee_users.employee_id = employees.id
         LEFT JOIN attendance_entries
           ON attendance_entries.employee_id = employees.id
          AND attendance_entries.attendance_date = ?
@@ -458,6 +526,7 @@ def build_bootstrap_payload(conn, selected_date, admin):
                 "name": row["name"],
                 "department": row["department"],
                 "code": row["code"],
+                "loginUsername": row["login_username"] or "",
                 "attendance": {
                     "status": status,
                     "inTime": to_json_value(row["in_time"]),
@@ -503,9 +572,42 @@ def build_bootstrap_payload(conn, selected_date, admin):
 
     total = len(employee_payload)
     presence_rate = 0 if total == 0 else round(((checked_in + checked_out) / total) * 100)
+    current_employee = None
+    self_records = []
+    if employee_session:
+        current_employee = next((employee for employee in employee_payload if employee["id"] == employee_session["employee_id"]), None)
+        self_records_raw = db_fetchall(
+            conn,
+            """
+            SELECT
+                activity_records.id,
+                activity_records.status,
+                activity_records.leave_type,
+                activity_records.details,
+                activity_records.occurred_at
+            FROM activity_records
+            WHERE activity_records.employee_id = ?
+            ORDER BY activity_records.occurred_at DESC, activity_records.id DESC
+            LIMIT 10
+            """,
+            (employee_session["employee_id"],),
+        )
+        self_records = [
+            {
+                "id": row["id"],
+                "status": row["status"],
+                "leaveType": row["leave_type"] or "",
+                "details": row["details"],
+                "timestamp": to_json_value(row["occurred_at"]),
+                "timestampLabel": format_timestamp(row["occurred_at"]),
+            }
+            for row in self_records_raw
+        ]
     return {
         "isAdmin": bool(admin),
         "currentAdminUsername": admin["username"] if admin else "",
+        "employeeLoggedIn": bool(employee_session),
+        "currentEmployee": current_employee,
         "selectedDate": selected_date,
         "employees": employee_payload,
         "records": [
@@ -521,6 +623,7 @@ def build_bootstrap_payload(conn, selected_date, admin):
             }
             for row in records
         ],
+        "selfRecords": self_records,
         "admins": admins,
         "summary": {
             "checkedInCount": checked_in,
@@ -551,14 +654,22 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             return self.handle_login()
         if parsed.path == "/api/logout":
             return self.handle_logout()
+        if parsed.path == "/api/employee-login":
+            return self.handle_employee_login()
+        if parsed.path == "/api/employee-logout":
+            return self.handle_employee_logout()
         if parsed.path == "/api/employees":
             return self.handle_create_employee()
         if parsed.path == "/api/attendance":
             return self.handle_attendance_action()
+        if parsed.path == "/api/employee-attendance":
+            return self.handle_employee_attendance_action()
         if parsed.path == "/api/admins":
             return self.handle_create_admin()
         if parsed.path == "/api/change-password":
             return self.handle_change_password()
+        if parsed.path == "/api/employee-credentials":
+            return self.handle_employee_credentials()
         self.send_error(404, "Not found")
 
     def do_PUT(self):
@@ -603,12 +714,18 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def get_session_token(self):
+        return self.get_cookie_value(SESSION_COOKIE)
+
+    def get_employee_session_token(self):
+        return self.get_cookie_value(EMPLOYEE_SESSION_COOKIE)
+
+    def get_cookie_value(self, cookie_name):
         raw = self.headers.get("Cookie")
         if not raw:
             return None
         jar = cookies.SimpleCookie()
         jar.load(raw)
-        morsel = jar.get(SESSION_COOKIE)
+        morsel = jar.get(cookie_name)
         return morsel.value if morsel else None
 
     def require_admin(self, conn):
@@ -622,7 +739,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         selected_date = parse_qs(parsed.query).get("date", [today_key()])[0]
         conn = get_connection()
         admin = get_session_admin(conn, self.get_session_token())
-        payload = build_bootstrap_payload(conn, selected_date, admin)
+        employee_session = get_session_employee(conn, self.get_employee_session_token())
+        payload = build_bootstrap_payload(conn, selected_date, admin, employee_session)
         conn.close()
         self.send_json(200, payload)
 
@@ -656,6 +774,47 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         cookie[SESSION_COOKIE] = ""
         cookie[SESSION_COOKIE]["path"] = "/"
         cookie[SESSION_COOKIE]["expires"] = "Thu, 01 Jan 1970 00:00:00 GMT"
+        self.send_json(200, {"ok": True}, {"Set-Cookie": cookie.output(header="").strip()})
+
+    def handle_employee_login(self):
+        data = self.parse_json_body()
+        conn = get_connection()
+        employee_user = db_fetchone(
+            conn,
+            """
+            SELECT employee_users.*, employees.name, employees.department, employees.code
+            FROM employee_users
+            JOIN employees ON employees.id = employee_users.employee_id
+            WHERE employee_users.username = ?
+            """,
+            (data.get("username", "").strip(),),
+        )
+        if not employee_user or not verify_password(data.get("password", ""), employee_user["password_hash"]):
+            conn.close()
+            return self.send_json(401, {"error": "Invalid employee username or password"})
+        token = secrets.token_hex(24)
+        expires_at = (now_utc() + timedelta(days=7)).isoformat()
+        db_execute(conn, "INSERT INTO employee_sessions (token, employee_user_id, expires_at) VALUES (?, ?, ?)", (token, employee_user["id"], expires_at))
+        conn.commit()
+        conn.close()
+        cookie = cookies.SimpleCookie()
+        cookie[EMPLOYEE_SESSION_COOKIE] = token
+        cookie[EMPLOYEE_SESSION_COOKIE]["path"] = "/"
+        cookie[EMPLOYEE_SESSION_COOKIE]["httponly"] = True
+        cookie[EMPLOYEE_SESSION_COOKIE]["samesite"] = "Lax"
+        self.send_json(200, {"ok": True}, {"Set-Cookie": cookie.output(header="").strip()})
+
+    def handle_employee_logout(self):
+        conn = get_connection()
+        token = self.get_employee_session_token()
+        if token:
+            db_execute(conn, "DELETE FROM employee_sessions WHERE token = ?", (token,))
+            conn.commit()
+        conn.close()
+        cookie = cookies.SimpleCookie()
+        cookie[EMPLOYEE_SESSION_COOKIE] = ""
+        cookie[EMPLOYEE_SESSION_COOKIE]["path"] = "/"
+        cookie[EMPLOYEE_SESSION_COOKIE]["expires"] = "Thu, 01 Jan 1970 00:00:00 GMT"
         self.send_json(200, {"ok": True}, {"Set-Cookie": cookie.output(header="").strip()})
 
     def handle_create_admin(self):
@@ -701,6 +860,39 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             return self.send_json(400, {"error": "New password must be at least 8 characters"})
         db_execute(conn, "UPDATE admins SET password_hash = ? WHERE id = ?", (pbkdf2_hash_password(new_password), admin["id"]))
         conn.commit()
+        conn.close()
+        self.send_json(200, {"ok": True})
+
+    def handle_employee_credentials(self):
+        conn = get_connection()
+        if not self.require_admin(conn):
+            conn.close()
+            return
+        data = self.parse_json_body()
+        employee_id = int(data["employeeId"])
+        username = data.get("username", "").strip()
+        password = data.get("password", "")
+        if len(username) < 3 or len(password) < 8:
+            conn.close()
+            return self.send_json(400, {"error": "Employee username must be 3+ characters and password 8+ characters"})
+        existing = db_fetchone(conn, "SELECT id FROM employee_users WHERE employee_id = ?", (employee_id,))
+        try:
+            if existing:
+                db_execute(
+                    conn,
+                    "UPDATE employee_users SET username = ?, password_hash = ? WHERE employee_id = ?",
+                    (username, pbkdf2_hash_password(password), employee_id),
+                )
+            else:
+                db_execute(
+                    conn,
+                    "INSERT INTO employee_users (employee_id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                    (employee_id, username, pbkdf2_hash_password(password), now_utc().isoformat()),
+                )
+            conn.commit()
+        except Exception:
+            conn.close()
+            return self.send_json(400, {"error": "Employee username already exists"})
         conn.close()
         self.send_json(200, {"ok": True})
 
@@ -822,6 +1014,58 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         conn.close()
         self.send_json(200, {"ok": True})
 
+    def handle_employee_attendance_action(self):
+        conn = get_connection()
+        employee_session = get_session_employee(conn, self.get_employee_session_token())
+        if not employee_session:
+            conn.close()
+            return self.send_json(401, {"error": "Employee login required"})
+        data = self.parse_json_body()
+        employee_id = employee_session["employee_id"]
+        selected_date = today_key()
+        action = data["action"]
+        entry = db_fetchone(
+            conn,
+            "SELECT * FROM attendance_entries WHERE employee_id = ? AND attendance_date = ?",
+            (employee_id, selected_date),
+        )
+        timestamp = combine_selected_date_time(selected_date)
+
+        if action == "check_in":
+            payload = {
+                "status": "Checked In",
+                "in_time": timestamp,
+                "out_time": None,
+                "overtime_hours": 0,
+                "on_leave": bool_to_db(False),
+                "leave_type": "",
+                "last_updated_at": timestamp,
+            }
+            self.upsert_attendance(conn, employee_id, selected_date, payload)
+            self.insert_record(conn, employee_id, selected_date, "Checked In", "", f"Self check-in at {format_time_label(timestamp)}", timestamp)
+        elif action == "check_out":
+            in_time = entry["in_time"] if entry and entry["in_time"] else timestamp
+            overtime = calculate_overtime_hours(in_time, timestamp)
+            payload = {
+                "status": "Checked Out",
+                "in_time": in_time,
+                "out_time": timestamp,
+                "overtime_hours": overtime,
+                "on_leave": bool_to_db(False),
+                "leave_type": "",
+                "last_updated_at": timestamp,
+            }
+            self.upsert_attendance(conn, employee_id, selected_date, payload)
+            self.insert_record(conn, employee_id, selected_date, "Checked Out", "", f"Self check-out at {format_time_label(timestamp)} • OT {overtime}h", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Overtime Auto", "", f"Overtime auto-calculated to {overtime}h", timestamp)
+        else:
+            conn.close()
+            return self.send_json(400, {"error": "Unknown employee action"})
+
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"ok": True})
+
     def upsert_attendance(self, conn, employee_id, selected_date, payload):
         db_execute(
             conn,
@@ -870,7 +1114,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
         selected_date = params.get("date", [today_key()])[0]
         file_format = params.get("format", ["csv"])[0]
-        payload = build_bootstrap_payload(conn, selected_date, admin)
+        payload = build_bootstrap_payload(conn, selected_date, admin, None)
         conn.close()
 
         rows = payload["employees"]
