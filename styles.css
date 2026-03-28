@@ -73,6 +73,20 @@ th,
   line-height: 0.96;
 }
 
+.install-strip {
+  margin-top: 1.1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  align-items: center;
+}
+
+.install-hint {
+  margin: 0;
+  max-width: 34rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+
 .hero-text {
   max-width: 56ch;
   color: rgba(255, 255, 255, 0.8);
@@ -562,5 +576,10 @@ td {
 
   .employee-actions {
     display: grid;
+  }
+
+  .install-strip {
+    align-items: start;
+    flex-direction: column;
   }
 }

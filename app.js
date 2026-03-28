@@ -3,6 +3,8 @@ const state = {
   currentAdminUsername: "",
   employeeLoggedIn: false,
   currentEmployee: null,
+  deferredInstallPrompt: null,
+  isStandalone: false,
   selectedDate: formatDateKey(new Date()),
   employees: [],
   filteredEmployees: [],
@@ -84,10 +86,42 @@ const monthWorkedDays = document.getElementById("monthWorkedDays");
 const monthPresentDays = document.getElementById("monthPresentDays");
 const monthLeaveDays = document.getElementById("monthLeaveDays");
 const monthOvertimeHours = document.getElementById("monthOvertimeHours");
+const installAppBtn = document.getElementById("installAppBtn");
+const installHint = document.getElementById("installHint");
 
 const employeeCardTemplate = document.getElementById("employeeCardTemplate");
 
 reportDateInput.value = state.selectedDate;
+state.isStandalone = isStandaloneDisplayMode();
+
+installAppBtn.addEventListener("click", async () => {
+  if (!state.deferredInstallPrompt) {
+    installHint.textContent = "On iPhone, open Share and tap Add to Home Screen.";
+    return;
+  }
+
+  state.deferredInstallPrompt.prompt();
+  const result = await state.deferredInstallPrompt.userChoice;
+  state.deferredInstallPrompt = null;
+  installHint.textContent =
+    result.outcome === "accepted"
+      ? "App installed. You can open IHC Attendence Tracker from your home screen."
+      : "Install was cancelled. You can still install it later from your browser menu.";
+  renderInstallState();
+});
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  state.deferredInstallPrompt = event;
+  renderInstallState();
+});
+
+window.addEventListener("appinstalled", () => {
+  state.deferredInstallPrompt = null;
+  state.isStandalone = true;
+  installHint.textContent = "IHC Attendence Tracker is installed on this device.";
+  renderInstallState();
+});
 
 employeeLoginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -228,6 +262,7 @@ exportExcelBtn.addEventListener("click", () => {
 });
 
 loadDashboard();
+registerServiceWorker();
 
 async function loadDashboard() {
   const data = await api(`/api/bootstrap?date=${encodeURIComponent(state.selectedDate)}`);
@@ -251,12 +286,31 @@ function render() {
   reportDateInput.value = state.selectedDate;
   renderEmployeeState();
   renderAdminState();
+  renderInstallState();
   renderEmployees();
   renderHistory();
   renderSummary();
   renderMonthlySummary();
   renderAdminUsers();
   renderSelfDashboard();
+}
+
+function renderInstallState() {
+  state.isStandalone = isStandaloneDisplayMode();
+  const canInstall = Boolean(state.deferredInstallPrompt) && !state.isStandalone;
+  installAppBtn.classList.toggle("hidden", !canInstall);
+
+  if (state.isStandalone) {
+    installHint.textContent = "Installed mode is active on this device.";
+    return;
+  }
+
+  if (canInstall) {
+    installHint.textContent = "Tap Install app for a home-screen version on supported devices.";
+    return;
+  }
+
+  installHint.textContent = "Android: browser menu > Install app. iPhone: Share > Add to Home Screen.";
 }
 
 function renderEmployeeState() {
@@ -663,4 +717,20 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function isStandaloneDisplayMode() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  try {
+    await navigator.serviceWorker.register("/sw.js");
+  } catch (_error) {
+    installHint.textContent = "Install features are limited because the service worker could not be registered.";
+  }
 }

@@ -1,0 +1,25 @@
+{
+  "name": "IHC Attendence Tracker",
+  "short_name": "IHC Tracker",
+  "description": "IHC employee attendance tracker for check-in, check-out, leave, and overtime.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8f2e8",
+  "theme_color": "#122038",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/app-icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

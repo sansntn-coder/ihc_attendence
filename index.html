@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IHC Attendance Tracker</title>
+    <meta name="theme-color" content="#122038" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="IHC Tracker" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/app-icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/app-icon.svg" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -11,6 +18,10 @@
       <header class="hero">
         <div class="hero-copy">
           <h1>IHC ATTENDENCE TRACKER</h1>
+          <div class="install-strip">
+            <button type="button" id="installAppBtn" class="secondary-btn hidden">Install app</button>
+            <p id="installHint" class="install-hint">Open this on Android or iPhone and add it to the home screen.</p>
+          </div>
         </div>
         <div class="hero-panel">
           <div class="hero-metric">
