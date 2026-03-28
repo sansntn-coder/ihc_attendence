@@ -297,6 +297,7 @@ th,
 
 .employee-form label,
 .filter-control,
+.shift-control,
 .leave-type-control,
 .manual-time-control {
   display: grid;
@@ -308,6 +309,7 @@ th,
 .employee-form input,
 .filter-control input,
 .filter-control select,
+.shift-control select,
 .leave-type-control select,
 .manual-time-control input {
   width: 100%;
@@ -323,6 +325,10 @@ th,
   pointer-events: none;
 }
 
+.shift-control {
+  min-width: 150px;
+}
+
 .leave-type-control {
   min-width: 160px;
 }
@@ -331,6 +337,7 @@ th,
   min-width: 150px;
 }
 
+.shift-control span,
 .leave-type-control span {
   font-size: 0.8rem;
 }
@@ -595,6 +602,7 @@ td {
   }
 
   .leave-type-control,
+  .shift-control,
   .manual-time-control,
   .employee-actions .action-btn {
     min-width: 0;
@@ -607,6 +615,7 @@ td {
     font-size: 0.92rem;
   }
 
+  .shift-control select,
   .leave-type-control select,
   .manual-time-control input {
     padding: 0.8rem 0.85rem;

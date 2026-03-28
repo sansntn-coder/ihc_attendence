@@ -405,6 +405,7 @@ function renderSelfDashboard() {
     : "Your password is active. Use this form whenever you want to change it.";
   selfAttendanceCard.innerHTML = `
     <div class="timing-grid">
+      <div class="timing-item"><span>Shift</span><strong>${escapeHtml(attendance.shiftName || "General")}</strong></div>
       <div class="timing-item"><span>Status</span><strong>${escapeHtml(attendance.status)}</strong></div>
       <div class="timing-item"><span>In Time</span><strong>${escapeHtml(formatTime(attendance.inTime))}</strong></div>
       <div class="timing-item"><span>Out Time</span><strong>${escapeHtml(formatTime(attendance.outTime))}</strong></div>
@@ -471,12 +472,14 @@ function renderEmployees() {
     const name = fragment.querySelector(".employee-name");
     const subtitle = fragment.querySelector(".employee-subtitle");
     const status = fragment.querySelector(".employee-status");
+    const shift = fragment.querySelector(".employee-shift");
     const inTime = fragment.querySelector(".employee-in-time");
     const outTime = fragment.querySelector(".employee-out-time");
     const overtime = fragment.querySelector(".employee-overtime");
     const leave = fragment.querySelector(".employee-leave");
     const leaveType = fragment.querySelector(".employee-leave-type");
     const leaveTypeSelect = fragment.querySelector(".leave-type-select");
+    const shiftSelect = fragment.querySelector(".shift-select");
     const manualInTimeInput = fragment.querySelector(".manual-in-time");
     const manualOutTimeInput = fragment.querySelector(".manual-out-time");
     const editBtn = fragment.querySelector(".edit-btn");
@@ -486,23 +489,25 @@ function renderEmployees() {
     subtitle.textContent = `${employee.department} • ${employee.code} • login with name: ${employee.loginUsername}`;
     status.textContent = attendance.status;
     status.classList.add(`status-${attendance.status.toLowerCase().replace(/\s+/g, "-")}`);
+    shift.textContent = attendance.shiftName || "General";
     inTime.textContent = formatTime(attendance.inTime);
     outTime.textContent = formatTime(attendance.outTime);
     overtime.textContent = `${attendance.overtimeHours}h`;
     leave.textContent = attendance.onLeave ? "Yes" : "No";
     leaveType.textContent = attendance.leaveType || "--";
+    shiftSelect.value = attendance.shiftName || "General";
     leaveTypeSelect.value = attendance.leaveType || "Sick";
     manualInTimeInput.value = toTimeInputValue(attendance.inTime);
     manualOutTimeInput.value = toTimeInputValue(attendance.outTime);
 
     fragment.querySelector(".check-in-btn").addEventListener("click", async () => {
-      await updateAttendance(employee.id, "check_in", "", manualInTimeInput.value);
+      await updateAttendance(employee.id, "check_in", "", manualInTimeInput.value, shiftSelect.value);
     });
     fragment.querySelector(".check-out-btn").addEventListener("click", async () => {
-      await updateAttendance(employee.id, "check_out", "", manualOutTimeInput.value);
+      await updateAttendance(employee.id, "check_out", "", manualOutTimeInput.value, shiftSelect.value);
     });
     fragment.querySelector(".leave-btn").addEventListener("click", async () => {
-      await updateAttendance(employee.id, "leave", leaveTypeSelect.value);
+      await updateAttendance(employee.id, "leave", leaveTypeSelect.value, "", shiftSelect.value);
     });
 
     editBtn.classList.toggle("hidden", !state.isAdmin);
@@ -613,14 +618,14 @@ function applyRosterFilters() {
   renderEmployees();
 }
 
-async function updateAttendance(employeeId, action, leaveType = "", manualTime = "") {
+async function updateAttendance(employeeId, action, leaveType = "", manualTime = "", shiftName = "General") {
   if (!requireAdmin()) {
     return;
   }
   try {
     await api("/api/attendance", {
       method: "POST",
-      body: { employeeId, action, leaveType, manualTime, date: state.selectedDate },
+      body: { employeeId, action, leaveType, manualTime, shiftName, date: state.selectedDate },
     });
     await loadDashboard();
   } catch (error) {

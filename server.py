@@ -24,6 +24,11 @@ EMPLOYEE_SESSION_COOKIE = "ihc_employee_session"
 HOST = os.environ.get("BIND_HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
 STANDARD_SHIFT_HOURS = 8.0
+SHIFT_SCHEDULES = {
+    "First": {"start": (6, 0), "end": (14, 0)},
+    "General": {"start": (9, 0), "end": (17, 30)},
+    "Second": {"start": (14, 0), "end": (22, 0)},
+}
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -77,6 +82,26 @@ def ensure_employee_user_columns(conn):
             ADD COLUMN IF NOT EXISTS password_is_temporary BOOLEAN NOT NULL DEFAULT TRUE
             """,
         )
+
+
+def ensure_attendance_entry_columns(conn):
+    if DB_BACKEND == "sqlite":
+        columns = {row["name"] for row in db_fetchall(conn, "PRAGMA table_info(attendance_entries)")}
+        if "shift_name" not in columns:
+            db_execute(conn, "ALTER TABLE attendance_entries ADD COLUMN shift_name TEXT NOT NULL DEFAULT 'General'")
+    else:
+        db_execute(
+            conn,
+            """
+            ALTER TABLE attendance_entries
+            ADD COLUMN IF NOT EXISTS shift_name TEXT NOT NULL DEFAULT 'General'
+            """,
+        )
+
+
+def normalize_shift_name(shift_name):
+    candidate = str(shift_name or "").strip().title()
+    return candidate if candidate in SHIFT_SCHEDULES else "General"
 
 
 def sync_employee_default_login(conn, employee_id, name, code):
@@ -222,6 +247,7 @@ def init_sqlite(conn):
             employee_id INTEGER NOT NULL,
             attendance_date TEXT NOT NULL,
             status TEXT NOT NULL,
+            shift_name TEXT NOT NULL DEFAULT 'General',
             in_time TEXT,
             out_time TEXT,
             overtime_hours REAL NOT NULL DEFAULT 0,
@@ -252,6 +278,7 @@ def init_sqlite(conn):
         """
     )
     ensure_employee_user_columns(conn)
+    ensure_attendance_entry_columns(conn)
     bootstrap_seed(conn)
     sync_all_employee_default_logins(conn)
 
@@ -310,6 +337,7 @@ def init_postgres(conn):
             employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
             attendance_date DATE NOT NULL,
             status TEXT NOT NULL,
+            shift_name TEXT NOT NULL DEFAULT 'General',
             in_time TIMESTAMP,
             out_time TIMESTAMP,
             overtime_hours DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -345,6 +373,7 @@ def init_postgres(conn):
         """,
     )
     ensure_employee_user_columns(conn)
+    ensure_attendance_entry_columns(conn)
     bootstrap_seed(conn)
     sync_all_employee_default_logins(conn)
 
@@ -381,21 +410,21 @@ def bootstrap_seed(conn):
 
     date_key = today_key()
     first_in = combine_selected_date_time(date_key)
-    second_in = combine_selected_date_time(date_key, hour=8, minute=30)
+    second_in = combine_selected_date_time(date_key, hour=9, minute=0)
     second_out = combine_selected_date_time(date_key, hour=18, minute=30)
-    overtime = calculate_overtime_hours(second_in, second_out)
+    overtime = calculate_overtime_hours(second_in, second_out, "General")
 
     for entry in [
-        (ids[0], date_key, "Checked In", first_in, None, 0, bool_to_db(False), "", now_utc().isoformat()),
-        (ids[1], date_key, "Checked Out", second_in, second_out, overtime, bool_to_db(False), "", now_utc().isoformat()),
-        (ids[2], date_key, "Leave", None, None, 0, bool_to_db(True), "Sick", now_utc().isoformat()),
+        (ids[0], date_key, "First", "Checked In", first_in, None, 0, bool_to_db(False), "", now_utc().isoformat()),
+        (ids[1], date_key, "General", "Checked Out", second_in, second_out, overtime, bool_to_db(False), "", now_utc().isoformat()),
+        (ids[2], date_key, "General", "Leave", None, None, 0, bool_to_db(True), "Sick", now_utc().isoformat()),
     ]:
         db_execute(
             conn,
             """
             INSERT INTO attendance_entries (
-                employee_id, attendance_date, status, in_time, out_time, overtime_hours, on_leave, leave_type, last_updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                employee_id, attendance_date, shift_name, status, in_time, out_time, overtime_hours, on_leave, leave_type, last_updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             entry,
         )
@@ -468,12 +497,19 @@ def format_time_label(value):
     return "--" if not parsed else parsed.strftime("%I:%M %p").lstrip("0")
 
 
-def calculate_overtime_hours(in_time, out_time):
+def calculate_overtime_hours(in_time, out_time, shift_name):
     if not in_time or not out_time:
         return 0
-    delta = parse_iso(out_time) - parse_iso(in_time)
-    worked_hours = delta.total_seconds() / 3600
-    return max(0, round(worked_hours - STANDARD_SHIFT_HOURS, 1))
+    shift = SHIFT_SCHEDULES.get(normalize_shift_name(shift_name), SHIFT_SCHEDULES["General"])
+    out_timestamp = parse_iso(out_time)
+    shift_end = out_timestamp.replace(
+        hour=shift["end"][0],
+        minute=shift["end"][1],
+        second=0,
+        microsecond=0,
+    )
+    overtime_hours = (out_timestamp - shift_end).total_seconds() / 3600
+    return max(0, round(overtime_hours, 1))
 
 
 def get_session_admin(conn, token):
@@ -568,6 +604,7 @@ def build_bootstrap_payload(conn, selected_date, admin, employee_session):
             employees.code,
             employee_users.username AS login_username,
             employee_users.password_is_temporary,
+            attendance_entries.shift_name,
             attendance_entries.status,
             attendance_entries.in_time,
             attendance_entries.out_time,
@@ -611,6 +648,7 @@ def build_bootstrap_payload(conn, selected_date, admin, employee_session):
                 "loginUsername": normalize_employee_login_name(row["name"]),
                 "passwordIsTemporary": bool(row["password_is_temporary"]) if row["password_is_temporary"] is not None else True,
                 "attendance": {
+                    "shiftName": normalize_shift_name(row["shift_name"]),
                     "status": status,
                     "inTime": to_json_value(row["in_time"]),
                     "outTime": to_json_value(row["out_time"]),
@@ -1154,6 +1192,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         selected_date = data["date"]
         action = data["action"]
         manual_time = data.get("manualTime", "")
+        shift_name = normalize_shift_name(data.get("shiftName", "General"))
         employee = db_fetchone(conn, "SELECT * FROM employees WHERE id = ?", (employee_id,))
         if not employee:
             conn.close()
@@ -1168,6 +1207,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
 
         if action == "check_in":
             payload = {
+                "shift_name": shift_name,
                 "status": "Checked In",
                 "in_time": timestamp,
                 "out_time": None,
@@ -1177,11 +1217,13 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 "last_updated_at": timestamp,
             }
             self.upsert_attendance(conn, employee_id, selected_date, payload)
-            self.insert_record(conn, employee_id, selected_date, "Checked In", "", f"In time set to {format_time_label(timestamp)}", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Checked In", "", f"Shift {shift_name} • In time set to {format_time_label(timestamp)}", timestamp)
         elif action == "check_out":
             in_time = entry["in_time"] if entry and entry["in_time"] else timestamp
-            overtime = calculate_overtime_hours(in_time, timestamp)
+            selected_shift = normalize_shift_name(entry["shift_name"] if entry and entry.get("shift_name") else shift_name)
+            overtime = calculate_overtime_hours(in_time, timestamp, selected_shift)
             payload = {
+                "shift_name": selected_shift,
                 "status": "Checked Out",
                 "in_time": in_time,
                 "out_time": timestamp,
@@ -1191,11 +1233,12 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 "last_updated_at": timestamp,
             }
             self.upsert_attendance(conn, employee_id, selected_date, payload)
-            self.insert_record(conn, employee_id, selected_date, "Checked Out", "", f"In {format_time_label(in_time)} • Out {format_time_label(timestamp)} • OT {overtime}h", timestamp)
-            self.insert_record(conn, employee_id, selected_date, "Overtime Auto", "", f"Overtime auto-calculated to {overtime}h", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Checked Out", "", f"Shift {selected_shift} • In {format_time_label(in_time)} • Out {format_time_label(timestamp)} • OT {overtime}h", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Overtime Auto", "", f"Shift {selected_shift} overtime auto-calculated to {overtime}h", timestamp)
         elif action == "leave":
             leave_type = data.get("leaveType", "")
             payload = {
+                "shift_name": shift_name,
                 "status": "Leave",
                 "in_time": None,
                 "out_time": None,
@@ -1205,7 +1248,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 "last_updated_at": timestamp,
             }
             self.upsert_attendance(conn, employee_id, selected_date, payload)
-            self.insert_record(conn, employee_id, selected_date, "Leave", leave_type, f"Marked on leave for {leave_type}", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Leave", leave_type, f"Shift {shift_name} • Marked on leave for {leave_type}", timestamp)
         else:
             conn.close()
             return self.send_json(400, {"error": "Unknown action"})
@@ -1230,9 +1273,11 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             (employee_id, selected_date),
         )
         timestamp = combine_selected_date_time(selected_date)
+        shift_name = normalize_shift_name(entry["shift_name"] if entry and entry.get("shift_name") else "General")
 
         if action == "check_in":
             payload = {
+                "shift_name": shift_name,
                 "status": "Checked In",
                 "in_time": timestamp,
                 "out_time": None,
@@ -1242,11 +1287,12 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 "last_updated_at": timestamp,
             }
             self.upsert_attendance(conn, employee_id, selected_date, payload)
-            self.insert_record(conn, employee_id, selected_date, "Checked In", "", f"Self check-in at {format_time_label(timestamp)}", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Checked In", "", f"Shift {shift_name} • Self check-in at {format_time_label(timestamp)}", timestamp)
         elif action == "check_out":
             in_time = entry["in_time"] if entry and entry["in_time"] else timestamp
-            overtime = calculate_overtime_hours(in_time, timestamp)
+            overtime = calculate_overtime_hours(in_time, timestamp, shift_name)
             payload = {
+                "shift_name": shift_name,
                 "status": "Checked Out",
                 "in_time": in_time,
                 "out_time": timestamp,
@@ -1256,8 +1302,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 "last_updated_at": timestamp,
             }
             self.upsert_attendance(conn, employee_id, selected_date, payload)
-            self.insert_record(conn, employee_id, selected_date, "Checked Out", "", f"Self check-out at {format_time_label(timestamp)} • OT {overtime}h", timestamp)
-            self.insert_record(conn, employee_id, selected_date, "Overtime Auto", "", f"Overtime auto-calculated to {overtime}h", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Checked Out", "", f"Shift {shift_name} • Self check-out at {format_time_label(timestamp)} • OT {overtime}h", timestamp)
+            self.insert_record(conn, employee_id, selected_date, "Overtime Auto", "", f"Shift {shift_name} overtime auto-calculated to {overtime}h", timestamp)
         else:
             conn.close()
             return self.send_json(400, {"error": "Unknown employee action"})
@@ -1271,9 +1317,10 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             conn,
             """
             INSERT INTO attendance_entries (
-                employee_id, attendance_date, status, in_time, out_time, overtime_hours, on_leave, leave_type, last_updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                employee_id, attendance_date, shift_name, status, in_time, out_time, overtime_hours, on_leave, leave_type, last_updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(employee_id, attendance_date) DO UPDATE SET
+                shift_name = excluded.shift_name,
                 status = excluded.status,
                 in_time = excluded.in_time,
                 out_time = excluded.out_time,
@@ -1285,6 +1332,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             (
                 employee_id,
                 selected_date,
+                payload["shift_name"],
                 payload["status"],
                 payload["in_time"],
                 payload["out_time"],
@@ -1321,7 +1369,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         if file_format == "csv":
             buffer = io.StringIO()
             writer = csv.writer(buffer)
-            writer.writerow(["Employee", "Team / Unit", "Employee ID", "Status", "In Time", "Out Time", "Overtime Hours", "Leave Type"])
+            writer.writerow(["Employee", "Team / Unit", "Employee ID", "Shift", "Status", "In Time", "Out Time", "Overtime Hours", "Leave Type"])
             for row in rows:
                 attendance = row["attendance"]
                 writer.writerow(
@@ -1329,6 +1377,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                         row["name"],
                         row["department"],
                         row["code"],
+                        attendance["shiftName"],
                         attendance["status"],
                         format_time_label(attendance["inTime"]),
                         format_time_label(attendance["outTime"]),
@@ -1346,7 +1395,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             return
 
         table = [
-            "<table><tr><th>Employee</th><th>Team / Unit</th><th>Employee ID</th><th>Status</th><th>In Time</th><th>Out Time</th><th>Overtime Hours</th><th>Leave Type</th></tr>"
+            "<table><tr><th>Employee</th><th>Team / Unit</th><th>Employee ID</th><th>Shift</th><th>Status</th><th>In Time</th><th>Out Time</th><th>Overtime Hours</th><th>Leave Type</th></tr>"
         ]
         for row in rows:
             attendance = row["attendance"]
@@ -1355,6 +1404,7 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 f"<td>{row['name']}</td>"
                 f"<td>{row['department']}</td>"
                 f"<td>{row['code']}</td>"
+                f"<td>{attendance['shiftName']}</td>"
                 f"<td>{attendance['status']}</td>"
                 f"<td>{format_time_label(attendance['inTime'])}</td>"
                 f"<td>{format_time_label(attendance['outTime'])}</td>"
