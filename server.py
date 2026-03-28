@@ -52,6 +52,14 @@ def month_key(date_key):
     return date_key[:7]
 
 
+def resolve_csv_column(header_map, aliases):
+    for alias in aliases:
+        key = alias.strip().lower()
+        if key in header_map:
+            return header_map[key]
+    return None
+
+
 def pbkdf2_hash_password(password, salt=None):
     salt = salt or secrets.token_hex(16)
     derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000)
@@ -664,6 +672,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             return self.handle_employee_logout()
         if parsed.path == "/api/employees":
             return self.handle_create_employee()
+        if parsed.path == "/api/employees/import":
+            return self.handle_bulk_import_employees()
         if parsed.path == "/api/attendance":
             return self.handle_attendance_action()
         if parsed.path == "/api/employee-attendance":
@@ -918,6 +928,77 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             return self.send_json(400, {"error": "Employee ID already exists"})
         conn.close()
         self.send_json(201, {"ok": True})
+
+    def handle_bulk_import_employees(self):
+        conn = get_connection()
+        if not self.require_admin(conn):
+            conn.close()
+            return
+
+        data = self.parse_json_body()
+        csv_text = data.get("csvText", "").strip()
+        if not csv_text:
+            conn.close()
+            return self.send_json(400, {"error": "Upload a CSV file with employee data"})
+
+        imported_count = 0
+        errors = []
+
+        try:
+            reader = csv.DictReader(io.StringIO(csv_text))
+        except Exception:
+            conn.close()
+            return self.send_json(400, {"error": "CSV file could not be read"})
+
+        if not reader.fieldnames:
+            conn.close()
+            return self.send_json(400, {"error": "CSV file must include headers"})
+
+        header_map = {field.strip().lower(): field for field in reader.fieldnames if field}
+        name_key = resolve_csv_column(header_map, ["name", "employee name", "full name"])
+        department_key = resolve_csv_column(header_map, ["department", "team", "team / unit", "unit"])
+        code_key = resolve_csv_column(header_map, ["code", "employee id", "employee_id", "id"])
+
+        if not name_key or not department_key or not code_key:
+            conn.close()
+            return self.send_json(
+                400,
+                {"error": "CSV must contain name, department, and code columns"},
+            )
+
+        for line_number, row in enumerate(reader, start=2):
+            name = (row.get(name_key) or "").strip()
+            department = (row.get(department_key) or "").strip()
+            code = (row.get(code_key) or "").strip().upper()
+
+            if not name and not department and not code:
+                continue
+
+            if not name or not department or not code:
+                errors.append(f"Row {line_number}: missing name, department, or code")
+                continue
+
+            try:
+                db_execute(
+                    conn,
+                    "INSERT INTO employees (name, department, code, created_at) VALUES (?, ?, ?, ?)",
+                    (name, department, code, now_utc().isoformat()),
+                )
+                imported_count += 1
+            except Exception:
+                errors.append(f"Row {line_number}: employee ID {code} already exists")
+
+        conn.commit()
+        conn.close()
+        self.send_json(
+            200,
+            {
+                "ok": True,
+                "importedCount": imported_count,
+                "skippedCount": len(errors),
+                "errors": errors[:20],
+            },
+        )
 
     def handle_update_employee(self, employee_id):
         conn = get_connection()

@@ -64,6 +64,10 @@ const adminUsernameInput = document.getElementById("adminUsername");
 const adminPasswordInput = document.getElementById("adminPassword");
 const employeeSubmitBtn = document.getElementById("employeeSubmitBtn");
 const employeeFormHint = document.getElementById("employeeFormHint");
+const bulkImportForm = document.getElementById("bulkImportForm");
+const bulkImportFile = document.getElementById("bulkImportFile");
+const bulkImportBtn = document.getElementById("bulkImportBtn");
+const bulkImportHint = document.getElementById("bulkImportHint");
 const adminTools = document.getElementById("adminTools");
 const passwordChangeForm = document.getElementById("passwordChangeForm");
 const currentPasswordInput = document.getElementById("currentPassword");
@@ -237,6 +241,36 @@ employeeForm.addEventListener("submit", async (event) => {
   }
 });
 
+bulkImportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const file = bulkImportFile.files && bulkImportFile.files[0];
+  if (!file) {
+    window.alert("Choose a CSV file exported from Google Sheets.");
+    return;
+  }
+
+  try {
+    bulkImportBtn.disabled = true;
+    const csvText = await file.text();
+    const result = await api("/api/employees/import", {
+      method: "POST",
+      body: { csvText },
+    });
+    bulkImportForm.reset();
+    await loadDashboard();
+    const errorSummary = result.errors.length ? `\nSkipped rows:\n${result.errors.join("\n")}` : "";
+    window.alert(`Imported ${result.importedCount} employees.${result.skippedCount ? ` Skipped ${result.skippedCount} rows.` : ""}${errorSummary}`);
+  } catch (error) {
+    window.alert(error.message);
+  } finally {
+    bulkImportBtn.disabled = false;
+  }
+});
+
 reportDateInput.addEventListener("change", async () => {
   state.selectedDate = reportDateInput.value || formatDateKey(new Date());
   await loadDashboard();
@@ -384,8 +418,11 @@ function renderAdminState() {
   adminHelpText.classList.toggle("hidden", state.isAdmin);
   adminTools.classList.toggle("hidden", !state.isAdmin);
   employeeSubmitBtn.disabled = !state.isAdmin;
+  bulkImportBtn.disabled = !state.isAdmin;
   employeeForm.classList.toggle("is-disabled", !state.isAdmin);
+  bulkImportForm.classList.toggle("is-disabled", !state.isAdmin);
   employeeFormHint.classList.toggle("hidden", state.isAdmin);
+  bulkImportHint.classList.toggle("hidden", state.isAdmin);
 }
 
 function renderEmployees() {

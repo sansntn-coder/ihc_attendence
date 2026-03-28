@@ -167,6 +167,20 @@
             </label>
             <button type="submit" id="employeeSubmitBtn" class="primary-btn">Add to IHC roster</button>
           </form>
+          <div class="bulk-import-card">
+            <div class="panel-heading">
+              <h2>Bulk import from Google Sheets CSV</h2>
+              <p>Use a CSV exported from Google Sheets with columns: <strong>name</strong>, <strong>department</strong>, <strong>code</strong>.</p>
+            </div>
+            <form id="bulkImportForm" class="employee-form compact-form">
+              <label>
+                CSV file
+                <input type="file" id="bulkImportFile" accept=".csv,text/csv" />
+              </label>
+              <button type="submit" id="bulkImportBtn" class="secondary-btn">Import CSV</button>
+            </form>
+            <p id="bulkImportHint" class="admin-help">Admin login required to import employees in bulk.</p>
+          </div>
           <p id="employeeFormHint" class="admin-help">Admin login required to add new employees.</p>
         </section>
 
