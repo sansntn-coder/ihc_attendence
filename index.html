@@ -40,7 +40,7 @@
           <div class="panel-heading split-heading">
             <div>
               <h2>Employee access</h2>
-              <p>Employees can log in and mark their own attendance.</p>
+              <p>Employees can log in with their name and employee code, then change their password.</p>
             </div>
             <div class="admin-status-bar">
               <span id="employeeStatusBadge" class="admin-badge">Employee logged out</span>
@@ -49,12 +49,12 @@
           </div>
           <form id="employeeLoginForm" class="employee-form inline-form">
             <label>
-              Employee username
-              <input type="text" id="employeeLoginUsername" placeholder="employee.user" required />
+              Employee name
+              <input type="text" id="employeeLoginUsername" placeholder="Aarav Patel" required />
             </label>
             <label>
               Password
-              <input type="password" id="employeeLoginPassword" placeholder="password" required />
+              <input type="password" id="employeeLoginPassword" placeholder="Employee code" required />
             </label>
             <button type="submit" class="primary-btn">Employee login</button>
           </form>
@@ -75,6 +75,21 @@
             <button type="button" id="selfCheckInBtn" class="action-btn check-in-btn">Self check in</button>
             <button type="button" id="selfCheckOutBtn" class="action-btn check-out-btn">Self check out</button>
           </div>
+          <section class="admin-card self-password-card">
+            <h3>Change my password</h3>
+            <form id="employeePasswordChangeForm" class="employee-form compact-form">
+              <label>
+                Current password
+                <input type="password" id="employeeCurrentPassword" required />
+              </label>
+              <label>
+                New password
+                <input type="password" id="employeeNewPassword" required />
+              </label>
+              <button type="submit" class="secondary-btn">Update password</button>
+            </form>
+            <p id="employeePasswordHelp" class="admin-help">First login password is your employee code.</p>
+          </section>
           <div class="panel-heading">
             <h2>My recent activity</h2>
           </div>
@@ -363,7 +378,6 @@
             </select>
           </label>
           <button class="action-btn leave-btn">Apply leave</button>
-          <button class="action-btn credentials-btn hidden">Set login</button>
           <button class="action-btn edit-btn hidden">Edit</button>
           <button class="action-btn remove-btn">Remove</button>
         </div>

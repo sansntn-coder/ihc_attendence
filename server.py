@@ -60,6 +60,70 @@ def resolve_csv_column(header_map, aliases):
     return None
 
 
+def normalize_employee_login_name(name):
+    return " ".join(str(name or "").strip().split())
+
+
+def ensure_employee_user_columns(conn):
+    if DB_BACKEND == "sqlite":
+        columns = {row["name"] for row in db_fetchall(conn, "PRAGMA table_info(employee_users)")}
+        if "password_is_temporary" not in columns:
+            db_execute(conn, "ALTER TABLE employee_users ADD COLUMN password_is_temporary INTEGER NOT NULL DEFAULT 1")
+    else:
+        db_execute(
+            conn,
+            """
+            ALTER TABLE employee_users
+            ADD COLUMN IF NOT EXISTS password_is_temporary BOOLEAN NOT NULL DEFAULT TRUE
+            """,
+        )
+
+
+def sync_employee_default_login(conn, employee_id, name, code):
+    default_login_name = normalize_employee_login_name(name)
+    internal_username = f"employee-{employee_id}"
+    existing = db_fetchone(conn, "SELECT id, password_is_temporary FROM employee_users WHERE employee_id = ?", (employee_id,))
+    password_hash = pbkdf2_hash_password(code.strip().upper())
+
+    if existing:
+        if bool(existing["password_is_temporary"]):
+            db_execute(
+                conn,
+                """
+                UPDATE employee_users
+                SET username = ?, password_hash = ?, password_is_temporary = ?
+                WHERE employee_id = ?
+                """,
+                (internal_username, password_hash, bool_to_db(True), employee_id),
+            )
+        else:
+            db_execute(
+                conn,
+                """
+                UPDATE employee_users
+                SET username = ?
+                WHERE employee_id = ?
+                """,
+                (internal_username, employee_id),
+            )
+        return
+
+    db_execute(
+        conn,
+        """
+        INSERT INTO employee_users (employee_id, username, password_hash, created_at, password_is_temporary)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (employee_id, internal_username, password_hash, now_utc().isoformat(), bool_to_db(True)),
+    )
+
+
+def sync_all_employee_default_logins(conn):
+    employees = db_fetchall(conn, "SELECT id, name, code FROM employees")
+    for employee in employees:
+        sync_employee_default_login(conn, employee["id"], employee["name"], employee["code"])
+
+
 def pbkdf2_hash_password(password, salt=None):
     salt = salt or secrets.token_hex(16)
     derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000)
@@ -187,7 +251,9 @@ def init_sqlite(conn):
         );
         """
     )
+    ensure_employee_user_columns(conn)
     bootstrap_seed(conn)
+    sync_all_employee_default_logins(conn)
 
 
 def init_postgres(conn):
@@ -278,7 +344,9 @@ def init_postgres(conn):
         )
         """,
     )
+    ensure_employee_user_columns(conn)
     bootstrap_seed(conn)
+    sync_all_employee_default_logins(conn)
 
 
 def bootstrap_seed(conn):
@@ -309,6 +377,7 @@ def bootstrap_seed(conn):
         )
         row = db_fetchone(conn, "SELECT id FROM employees WHERE code = ?", (employee[2],))
         ids.append(row["id"])
+        sync_employee_default_login(conn, row["id"], employee[0], employee[2])
 
     date_key = today_key()
     first_in = combine_selected_date_time(date_key)
@@ -498,6 +567,7 @@ def build_bootstrap_payload(conn, selected_date, admin, employee_session):
             employees.department,
             employees.code,
             employee_users.username AS login_username,
+            employee_users.password_is_temporary,
             attendance_entries.status,
             attendance_entries.in_time,
             attendance_entries.out_time,
@@ -538,7 +608,8 @@ def build_bootstrap_payload(conn, selected_date, admin, employee_session):
                 "name": row["name"],
                 "department": row["department"],
                 "code": row["code"],
-                "loginUsername": row["login_username"] or "",
+                "loginUsername": normalize_employee_login_name(row["name"]),
+                "passwordIsTemporary": bool(row["password_is_temporary"]) if row["password_is_temporary"] is not None else True,
                 "attendance": {
                     "status": status,
                     "inTime": to_json_value(row["in_time"]),
@@ -670,6 +741,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
             return self.handle_employee_login()
         if parsed.path == "/api/employee-logout":
             return self.handle_employee_logout()
+        if parsed.path == "/api/employee-change-password":
+            return self.handle_employee_change_password()
         if parsed.path == "/api/employees":
             return self.handle_create_employee()
         if parsed.path == "/api/employees/import":
@@ -793,17 +866,21 @@ class AttendanceHandler(BaseHTTPRequestHandler):
     def handle_employee_login(self):
         data = self.parse_json_body()
         conn = get_connection()
-        employee_user = db_fetchone(
+        identifier = normalize_employee_login_name(data.get("username", ""))
+        employee_users = db_fetchall(
             conn,
             """
             SELECT employee_users.*, employees.name, employees.department, employees.code
             FROM employee_users
             JOIN employees ON employees.id = employee_users.employee_id
-            WHERE employee_users.username = ?
+            WHERE LOWER(employee_users.username) = LOWER(?)
+               OR LOWER(employees.name) = LOWER(?)
             """,
-            (data.get("username", "").strip(),),
+            (identifier, identifier),
         )
-        if not employee_user or not verify_password(data.get("password", ""), employee_user["password_hash"]):
+        password = data.get("password", "")
+        employee_user = next((row for row in employee_users if verify_password(password, row["password_hash"])), None)
+        if not employee_user:
             conn.close()
             return self.send_json(401, {"error": "Invalid employee username or password"})
         token = secrets.token_hex(24)
@@ -817,6 +894,38 @@ class AttendanceHandler(BaseHTTPRequestHandler):
         cookie[EMPLOYEE_SESSION_COOKIE]["httponly"] = True
         cookie[EMPLOYEE_SESSION_COOKIE]["samesite"] = "Lax"
         self.send_json(200, {"ok": True}, {"Set-Cookie": cookie.output(header="").strip()})
+
+    def handle_employee_change_password(self):
+        conn = get_connection()
+        employee_session = get_session_employee(conn, self.get_employee_session_token())
+        if not employee_session:
+            conn.close()
+            return self.send_json(401, {"error": "Employee login required"})
+
+        data = self.parse_json_body()
+        current_password = data.get("currentPassword", "")
+        new_password = data.get("newPassword", "")
+        if len(new_password) < 8:
+            conn.close()
+            return self.send_json(400, {"error": "New password must be at least 8 characters"})
+
+        employee_user = db_fetchone(conn, "SELECT * FROM employee_users WHERE id = ?", (employee_session["employee_user_id"],))
+        if not employee_user or not verify_password(current_password, employee_user["password_hash"]):
+            conn.close()
+            return self.send_json(400, {"error": "Current password is incorrect"})
+
+        db_execute(
+            conn,
+            """
+            UPDATE employee_users
+            SET password_hash = ?, password_is_temporary = ?
+            WHERE id = ?
+            """,
+            (pbkdf2_hash_password(new_password), bool_to_db(False), employee_session["employee_user_id"]),
+        )
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"ok": True})
 
     def handle_employee_logout(self):
         conn = get_connection()
@@ -922,6 +1031,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 "INSERT INTO employees (name, department, code, created_at) VALUES (?, ?, ?, ?)",
                 (data["name"].strip(), data["department"].strip(), data["code"].strip().upper(), now_utc().isoformat()),
             )
+            employee = db_fetchone(conn, "SELECT id, name, code FROM employees WHERE code = ?", (data["code"].strip().upper(),))
+            sync_employee_default_login(conn, employee["id"], employee["name"], employee["code"])
             conn.commit()
         except Exception:
             conn.close()
@@ -984,6 +1095,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                     "INSERT INTO employees (name, department, code, created_at) VALUES (?, ?, ?, ?)",
                     (name, department, code, now_utc().isoformat()),
                 )
+                employee = db_fetchone(conn, "SELECT id, name, code FROM employees WHERE code = ?", (code,))
+                sync_employee_default_login(conn, employee["id"], employee["name"], employee["code"])
                 imported_count += 1
             except Exception:
                 errors.append(f"Row {line_number}: employee ID {code} already exists")
@@ -1012,6 +1125,8 @@ class AttendanceHandler(BaseHTTPRequestHandler):
                 "UPDATE employees SET name = ?, department = ?, code = ? WHERE id = ?",
                 (data["name"].strip(), data["department"].strip(), data["code"].strip().upper(), int(employee_id)),
             )
+            employee = db_fetchone(conn, "SELECT id, name, code FROM employees WHERE id = ?", (int(employee_id),))
+            sync_employee_default_login(conn, employee["id"], employee["name"], employee["code"])
             conn.commit()
         except Exception:
             conn.close()

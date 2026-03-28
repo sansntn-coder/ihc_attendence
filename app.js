@@ -46,6 +46,10 @@ const selfHistoryList = document.getElementById("selfHistoryList");
 const selfEmployeeName = document.getElementById("selfEmployeeName");
 const selfCheckInBtn = document.getElementById("selfCheckInBtn");
 const selfCheckOutBtn = document.getElementById("selfCheckOutBtn");
+const employeePasswordChangeForm = document.getElementById("employeePasswordChangeForm");
+const employeeCurrentPassword = document.getElementById("employeeCurrentPassword");
+const employeeNewPassword = document.getElementById("employeeNewPassword");
+const employeePasswordHelp = document.getElementById("employeePasswordHelp");
 
 const adminAccessSection = document.getElementById("adminAccessSection");
 const employeeAccessSection = document.getElementById("employeeAccessSection");
@@ -155,6 +159,29 @@ selfCheckInBtn.addEventListener("click", async () => {
 
 selfCheckOutBtn.addEventListener("click", async () => {
   await updateSelfAttendance("check_out");
+});
+
+employeePasswordChangeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.employeeLoggedIn) {
+    window.alert("Employee login is required.");
+    return;
+  }
+
+  try {
+    await api("/api/employee-change-password", {
+      method: "POST",
+      body: {
+        currentPassword: employeeCurrentPassword.value,
+        newPassword: employeeNewPassword.value,
+      },
+    });
+    employeePasswordChangeForm.reset();
+    await loadDashboard();
+    window.alert("Employee password updated successfully.");
+  } catch (error) {
+    window.alert(error.message);
+  }
 });
 
 adminLoginForm.addEventListener("submit", async (event) => {
@@ -373,6 +400,9 @@ function renderSelfDashboard() {
 
   const attendance = state.currentEmployee.attendance;
   selfEmployeeName.textContent = `${state.currentEmployee.name} • ${state.currentEmployee.code}`;
+  employeePasswordHelp.textContent = state.currentEmployee.passwordIsTemporary
+    ? "First login password is your employee code. Please change it now."
+    : "Your password is active. Use this form whenever you want to change it.";
   selfAttendanceCard.innerHTML = `
     <div class="timing-grid">
       <div class="timing-item"><span>Status</span><strong>${escapeHtml(attendance.status)}</strong></div>
@@ -449,12 +479,11 @@ function renderEmployees() {
     const leaveTypeSelect = fragment.querySelector(".leave-type-select");
     const manualInTimeInput = fragment.querySelector(".manual-in-time");
     const manualOutTimeInput = fragment.querySelector(".manual-out-time");
-    const credentialsBtn = fragment.querySelector(".credentials-btn");
     const editBtn = fragment.querySelector(".edit-btn");
     const removeBtn = fragment.querySelector(".remove-btn");
 
     name.textContent = employee.name;
-    subtitle.textContent = `${employee.department} • ${employee.code}${employee.loginUsername ? ` • login: ${employee.loginUsername}` : ""}`;
+    subtitle.textContent = `${employee.department} • ${employee.code} • login with name: ${employee.loginUsername}`;
     status.textContent = attendance.status;
     status.classList.add(`status-${attendance.status.toLowerCase().replace(/\s+/g, "-")}`);
     inTime.textContent = formatTime(attendance.inTime);
@@ -476,13 +505,9 @@ function renderEmployees() {
       await updateAttendance(employee.id, "leave", leaveTypeSelect.value);
     });
 
-    credentialsBtn.classList.toggle("hidden", !state.isAdmin);
     editBtn.classList.toggle("hidden", !state.isAdmin);
     removeBtn.classList.toggle("hidden", !state.isAdmin);
 
-    credentialsBtn.addEventListener("click", async () => {
-      await setEmployeeCredentials(employee);
-    });
     editBtn.addEventListener("click", async () => {
       await editEmployee(employee);
     });
@@ -612,33 +637,6 @@ async function updateSelfAttendance(action) {
     await api("/api/employee-attendance", {
       method: "POST",
       body: { action },
-    });
-    await loadDashboard();
-  } catch (error) {
-    window.alert(error.message);
-  }
-}
-
-async function setEmployeeCredentials(employee) {
-  if (!requireAdmin()) {
-    return;
-  }
-  const username = window.prompt("Set employee login username:", employee.loginUsername || `${employee.code.toLowerCase()}`);
-  if (username === null) {
-    return;
-  }
-  const password = window.prompt("Set employee login password (min 8 characters):", "");
-  if (password === null) {
-    return;
-  }
-  try {
-    await api("/api/employee-credentials", {
-      method: "POST",
-      body: {
-        employeeId: employee.id,
-        username: username.trim(),
-        password,
-      },
     });
     await loadDashboard();
   } catch (error) {
