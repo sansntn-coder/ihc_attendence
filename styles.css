@@ -471,8 +471,10 @@ th,
 }
 
 .action-btn {
-  padding: 0.7rem 1rem;
+  padding: 0.68rem 0.9rem;
   font-weight: 700;
+  border-radius: 12px;
+  min-height: 44px;
 }
 
 .check-in-btn { background: rgba(15, 157, 116, 0.13); color: #0f7d5d; }
